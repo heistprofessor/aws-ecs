@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: ALB Parameters
+        Parameters:
+          - ServiceName
+          - EnvironmentType
+          - InternalAlbSslListner
+          - InternalAlbDnsName
+          - InternalAlbHostedZoneID
+          - InternalAlbDnsName
+          - InternalAlbHostedZoneID
+
+    ParameterLabels:
+      ServiceName:
+        default: Public ALB Security Group
+      EnvironmentType:
+        default: KSF Environment
+      InternalAlbSslListner:
+        default: Public  ALB SSL Listner
+      InternalAlbDnsName:
+        default: Public  ALB DNS Name
+      InternalAlbHostedZoneID:
+        default: Public  ALB Hosted Zone ID   
+      InternalAlbDnsName:
+        default: Private ALB DNS name  
+      InternalAlbHostedZoneID:
+        default: Public  ALB Hosted Zone ID   
+
+
+Parameters:
+  ServiceName:
+    Description: Name of the Service.
+    Type: String
+  InternalAlbSslListner:
+    Description: Internal ALB SSL listner.
+    Type: String    
+  InternalAlbDnsName:
+    Description: Internal ALB DNS Name.
+    Type: String     
+  InternalAlbHostedZoneID:
+    Description: internal ALB Hosted Zone ID .
+    Type: String      
+  EnvironmentType:
+    Type: String
+    Description: Environment of Deployment
+  InternalAlbDnsName:
+    Description: Internal ALB DNS name
+    Type: String
+  InternalAlbHostedZoneID:
+    Description: Internal ALB Hosted Zone ID .
+    Type: String 
+
+Mappings:
+  ServiceListnerPriorityMap:
+    Demo:
+      ListnerPriority: 1
+
+Resources:
+  InternalAlbTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: Demo-ECS-TargetGroup
+      HealthCheckPath: "/"
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      HealthCheckProtocol: HTTP
+      TargetType: "instance"
+      VpcId: !ImportValue Vpc
+
+  InternalAlbSslListnerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref InternalAlbTargetGroup
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Ref R53DnsRecordSet
+      ListenerArn: !Ref InternalAlbSslListner
+      Priority:
+        !FindInMap [
+          ServiceListnerPriorityMap,
+          !Ref ServiceName,
+          ListnerPriority,
+        ]
+
+Outputs:
+  InternalAlbTargetGroup:
+    Value: !Ref InternalAlbTargetGroup
+  TargetGroupFullName:
+    Value: !GetAtt InternalAlbTargetGroup.TargetGroupFullName
+    Export:
+      Name: !Sub "${ServiceName}-TgFullName"

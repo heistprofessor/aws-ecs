@@ -1,0 +1,181 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  ClusterName:
+    Description: ECS Cluster Name
+    Type: String  
+  TargetCapacity:
+    Type: Number
+    Default: 100
+  Subnet:
+    Description: Select existing subnets. The number selected must match the number of subnets above. Subnets selected must be in separate AZs.
+    Type: List<AWS::EC2::Subnet::Id>    
+  NumberOfAZs:
+    Type: Number
+    AllowedValues:
+      - 2
+      - 3
+    Default: 3
+  ECSAMI:
+    Description: AMI ID
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id
+    Description: The Amazon Machine Image ID used for the cluster, leave it as the default value to get the latest AMI    
+  MaxInstances:
+    Description: "The maximum size of the Auto Scaling group."
+    Type: Number
+    Default: 2
+    ConstraintDescription: "Must be >= 1"
+    MinValue: 1
+  MinInstances:
+    Description: "The minimum size of the Auto Scaling group."
+    Type: Number
+    Default: 1
+    ConstraintDescription: "Must be >= 1"
+    MinValue: 1
+  DesiredInstances:
+    Description: "The desired start size of the Auto Scaling group."
+    Type: Number
+    Default: 2
+    ConstraintDescription: "Must be >= 1"
+    MinValue: 1
+  EcsSecurityGroup:
+    Description: Select the ALB security group.
+    Type: AWS::EC2::SecurityGroup::Id    
+  EC2KeyName:
+    AllowedPattern: ^([a-zA-Z0-9 @.`~!#$%^&*()_+,\\-])*$
+    ConstraintDescription: Must be letters (upper or lower), numbers, and special characters.
+    Description: Name of an EC2 KeyPair. Your bastion & Service instances will launch with this KeyPair.
+    Type: AWS::EC2::KeyPair::KeyName    
+  NumberOfSubnets:
+    AllowedValues:
+      - 2
+      - 3
+    Default: 3
+    Type: Number
+    
+Conditions:
+  NumberOfAZs3: !Equals ["3", !Ref NumberOfAZs]
+  NumberOfSubnets3:
+    !Equals [ 3, !Ref NumberOfSubnets ]  
+
+Resources:
+  ECSCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: !Ref ClusterName
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      CapacityProviders:
+        - !Ref ECSDemoCapacityProvider
+
+  ECSDemoCapacityProvider:
+    Type: AWS::ECS::CapacityProvider
+    Properties:
+      AutoScalingGroupProvider:
+        AutoScalingGroupArn: !Ref DemoECSAutoScalingGroup
+        ManagedScaling:
+          Status: ENABLED
+          MaximumScalingStepSize: 10
+          MinimumScalingStepSize:  1
+          TargetCapacity: !Ref TargetCapacity
+
+  DemoECSAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      CapacityRebalance: true
+      Cooldown: '60'
+      MinSize: !Ref MinInstances
+      MaxSize: !Ref MaxInstances
+      DesiredCapacity: !Ref DesiredInstances
+      HealthCheckGracePeriod: 30
+      HealthCheckType: ELB
+      LaunchTemplate:
+        LaunchTemplateId: !Ref EC2LaunchTemplate
+        Version: !GetAtt EC2LaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        !If
+          [ NumberOfSubnets3,
+          [ !Select [ 0, !Ref Subnet ], !Select [ 1, !Ref Subnet ], !Select [ 2, !Ref Subnet ] ],
+          [ !Select [ 0, !Ref Subnet ], !Select [ 1, !Ref Subnet ] ]
+          ]
+    CreationPolicy:
+      ResourceSignal:
+        Count: !Ref MinInstances
+        Timeout: PT3M
+
+  EC2LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: Demo-blackbox-Launchtemplate
+      LaunchTemplateData:
+        BlockDeviceMappings:
+          - DeviceName: "/dev/sda1"
+            Ebs:
+              DeleteOnTermination: true
+              Encrypted: true
+              VolumeSize: 20
+              VolumeType: 'gp3'
+        IamInstanceProfile:
+          Arn: !GetAtt DemoInstanceProfile.Arn
+        ImageId: !Ref ECSAMI
+        Monitoring:
+          Enabled: true
+        InstanceType: t3.medium
+        KeyName: !Ref EC2KeyName
+        SecurityGroupIds:
+          - !Ref EcsSecurityGroup
+
+  DemoInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /
+      Roles:
+        - !Ref DemoEC2Role
+
+  DemoEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ec2.amazonaws.com]
+            Action: ["sts:AssumeRole"]
+      Path: /
+      Policies:
+        - PolicyName: ecs-service
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  [
+                    "ecs:CreateCluster",
+                    "ecs:DeregisterContainerInstance",
+                    "ecs:DiscoverPollEndpoint",
+                    "ecs:Poll",
+                    "ecs:RegisterContainerInstance",
+                    "ecs:StartTelemetrySession",
+                    "ecs:Submit*",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents",
+                    "ecr:GetAuthorizationToken",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                  ]
+                Resource: "*"
+
+  CloudWatchLogsGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: Demo-blackbox
+      RetentionInDays: 180
+
+Outputs:
+  ClusterName:
+    Value: !Ref ECSCluster
+  ECSDemoCapacityProvider:
+    Value: !Ref ECSDemoCapacityProvider    

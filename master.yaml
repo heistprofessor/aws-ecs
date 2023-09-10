@@ -1,0 +1,91 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Metadata:
+  AWS::CloudFormation::Interface:
+
+    ParameterGroups:
+    - Label:
+        default: Environment Type
+      Parameters:
+        - EnvironmentType    
+    - Label:
+        default: Network
+      Parameters:
+        - NumberOfAZs        
+
+    ParameterLabels:
+      EnvironmentType:
+        default: Environment Type
+      NumberOfAZs:
+        default: Number of Availability Zones        
+
+Parameters:
+  EnvironmentType:
+    Type: String
+    Description: Environment of Deployment
+    Default: 'dev'
+  NumberOfAZs:
+    AllowedValues:
+    - 2
+    - 3
+    Default: 3
+    Description: Number of Availability Zones to use in the VPC. This must match your
+      selections in the list of Availability Zones parameter (1 or 2).
+    Type: Number    
+
+Resources:
+
+  ECSSecuritygroups:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Vpc: !ImportValue Vpc
+      TemplateURL: 01-securitygroups.yaml
+
+  InternalAlb:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        InternalAlbSecurityGroup:
+          !GetAtt [ECSSecuritygroups, Outputs.InternalAlbSecurityGroup]
+        Subnet: !ImportValue ServiceSubnet
+        NumberOfAZs: !Ref NumberOfAZs
+        LogsBucket: !ImportValue logsbucket
+        ServiceTags: !Join [",", [Airtel, Electron, Tech, None]]
+      TemplateURL: 02-alb.yaml
+
+  ServiceAlb:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        ServiceName: airtel
+        InternalAlbSslListner: !GetAtt [InternalAlb, Outputs.InternalAlbSslListner]
+        InternalAlbDnsName: !GetAtt [InternalAlb, Outputs.InternalAlbDnsName]
+        InternalAlbHostedZoneID: !GetAtt [InternalAlb, Outputs.InternalAlbHostedZoneID]
+        EnvironmentType: !Ref EnvironmentType
+        ServiceTags: !Join [",", [Airtel, DataScience, Tech, None]]
+      TemplateURL: 03-servicealb.yaml
+
+  Cluster:
+    DependsOn: ServiceAlb
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        ClusterName: Airtel-ECS-Cluster
+        Subnet: !ImportValue ServiceSubnet
+        EC2KeyName: !Sub 'KSF-EC2-${AWS::Region}-${EnvironmentType}'
+        EcsSecurityGroup: !GetAtt [ECSSecuritygroups, Outputs.ECSSecurityGroup]
+      TemplateURL: 04-cluster.yaml
+
+
+  EcsService:
+    DependsOn: Cluster
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      Parameters:
+        Subnet: !ImportValue ServiceSubnet
+        ClusterName: !GetAtt [Cluster, Outputs.ClusterName]
+        CapacityProvider: !GetAtt [Cluster, Outputs.ECSAirtelCapacityProvider]
+        ECSTargetGroup: !GetAtt [ServiceAlb, Outputs.InternalAlbTargetGroup]
+      TemplateURL: 05-ecsservice.yaml      

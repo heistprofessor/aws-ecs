@@ -1,0 +1,124 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Parameters:
+  ClusterName:
+    Description: ECS Cluster for this service
+    Type: String
+  CapacityProvider:
+    Description: ECS Capacity Provider Name
+    Type: String
+  ServiceName:
+    Description: ECS Capacity Provider Name
+    Type: String    
+    Default: Demo-Service
+  DesiredTaskCount:
+    Description: "The number of simultaneous tasks, that you want to run on the cluster."
+    Type: Number
+    Default: 1
+    ConstraintDescription: "Must be >= 1"
+    MinValue: 1
+  ECSTargetGroup:
+    Description: Target Group ARN
+    Type: String    
+  Subnet:
+    Type: CommaDelimitedList
+      
+Resources:
+
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ["sts:AssumeRole"]
+      Path: /
+      Policies:
+        - PolicyName: ecs-task
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  [
+                    "ecr:GetAuthorizationToken",
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:GetDownloadUrlForLayer",
+                    "ecr:BatchGetImage",
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents",
+                    "secretsmanager:GetSecretValue",
+                    "kms:Decrypt",
+                    "ssm:GetParameters",
+                  ]
+                Resource: "*"
+
+  TaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: Demo
+      ExecutionRoleArn: !Ref TaskRole
+      TaskRoleArn: !Ref TaskRole
+      RuntimePlatform: 
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      RequiresCompatibilities:
+        - "EC2"
+      ContainerDefinitions:
+        - Name: nginx
+          Cpu: 1
+          Memory: 1024
+          Image: "nginx:latest"
+          PortMappings:
+            - ContainerPort: 80
+
+  ECSService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: Demo-ECS-Cluster
+      CapacityProviderStrategy:
+      - CapacityProvider: !Ref CapacityProvider
+        Base: 0
+        Weight: 1
+      TaskDefinition: !Ref TaskDefinition
+      ServiceName: Demo-service
+      SchedulingStrategy: REPLICA
+      DesiredCount: 1
+      LoadBalancers:
+      - ContainerName: Demo
+        ContainerPort: 80
+        LoadBalancerName:
+          Ref: AWS::NoValue
+        TargetGroupArn: !Ref ECSTargetGroup
+      Role: !Ref ServiceRole 
+
+
+  ServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs.amazonaws.com]
+            Action: ["sts:AssumeRole"]
+      Path: /
+      Policies:
+        - PolicyName: ecs-service
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  [
+                    "elasticloadbalancing:DeregisterInstancesFromLoadBalancer",
+                    "elasticloadbalancing:DeregisterTargets",
+                    "elasticloadbalancing:Describe*",
+                    "elasticloadbalancing:RegisterInstancesWithLoadBalancer",
+                    "elasticloadbalancing:RegisterTargets",
+                    "ec2:Describe*",
+                    "ec2:AuthorizeSecurityGroupIngress",
+                    "elasticloadbalancing:DescribeTargetGroups"
+                  ]
+                Resource: "*"

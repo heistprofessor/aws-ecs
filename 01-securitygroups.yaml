@@ -1,0 +1,60 @@
+---
+AWSTemplateFormatVersion: 2010-09-09
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: AWS Parameters
+      Parameters:
+        - Vpc
+    ParameterLabels:
+      Vpc:
+        default: Vpc Id
+
+
+Parameters:
+  Vpc:
+    AllowedPattern: ^(vpc-)([a-z0-9]{8}|[a-z0-9]{17})$
+    Description: The Vpc Id of an existing Vpc.
+    Type: AWS::EC2::VPC::Id
+
+Resources:
+
+  ECSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ALB
+      SecurityGroupIngress:
+        - FromPort: 0
+          ToPort: 65535
+          IpProtocol: tcp
+          SourceSecurityGroupId: !GetAtt InternalAlbSecurityGroup.GroupId
+      VpcId:
+        !Ref Vpc
+
+  InternalAlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for ALB
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      VpcId: !ImportValue Vpc
+
+Outputs:
+
+Outputs:
+  ECSSecurityGroup:
+    Description: A reference to the security group for ECS
+    Value: !Ref ECSSecurityGroup
+
+  InternalAlbSecurityGroup:
+    Description: A reference to the security group for load balancers
+    Value: !Ref InternalAlbSecurityGroup          

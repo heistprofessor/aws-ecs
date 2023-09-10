@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: ALB Parameters
+        Parameters:
+          - PublicAlbSecurityGroup
+          - Subnet
+          - NumberOfAZs
+          - LogsBucket
+    ParameterLabels:
+      PublicAlbSecurityGroup:
+        default: Public ALB Security Group
+      Subnet:
+        default: Subnets
+      NumberOfAZs:
+        default: Number of Availability Zones
+      LogsBucket:
+        default: Bucket for LoadBalancer Logs
+
+Parameters:
+  PublicAlbSecurityGroup:
+    Description: Select the ALB security group.
+    Type: AWS::EC2::SecurityGroup::Id
+  Subnet:
+    Description: Select existing subnets. The number selected must match the number of subnets above. Subnets selected must be in separate AZs.
+    Type: List<AWS::EC2::Subnet::Id>
+  NumberOfAZs:
+    AllowedValues:
+      - 2
+      - 3
+    Default: 3
+    Description:
+      Number of Availability Zones to use in the VPC. This must match your
+      selections in the list of Availability Zones parameter (1 or 2).
+    Type: Number
+  LogsBucket:
+    Type: String
+    Description: Bucket for LoadBalancer Logs
+
+Conditions:
+  NumberOfAZs3: !Equals ["3", !Ref NumberOfAZs]
+
+Resources:
+  PublicAlbListenerNoSslCertificate:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - RedirectConfig:
+            Host: "#{host}"
+            Path: "/#{path}"
+            Port: "443"
+            Protocol: "HTTPS"
+            Query: "#{query}"
+            StatusCode: HTTP_301
+          Type: "redirect"
+      LoadBalancerArn: !Ref PublicApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  PublicApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: Public-Demo-ALB
+      Scheme: internet-facing
+      Subnets:
+        !If [
+          NumberOfAZs3,
+          [
+            !Select [0, !Ref Subnet],
+            !Select [1, !Ref Subnet],
+            !Select [2, !Ref Subnet],
+          ],
+          [!Select [0, !Ref Subnet], !Select [1, !Ref Subnet]],
+        ]
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: "60"
+        - Key: access_logs.s3.enabled
+          Value: "true"
+        - Key: access_logs.s3.bucket
+          Value: !Ref LogsBucket
+      SecurityGroups:
+        - !Ref PublicAlbSecurityGroup
+
+Outputs:
+  PublicAlbDnsName:
+    Value: !GetAtt PublicApplicationLoadBalancer.DNSName
+    Export:
+      Name: Demo-PublicAlbDnsName
+  PublicAlbHostedZoneID:
+    Value: !GetAtt PublicApplicationLoadBalancer.CanonicalHostedZoneID
+    Export:
+      Name: Demo-PublicAlbHostedZoneID
+  PublicAlbSslListner:
+    Value: !Ref PublicAlbListenerWithSslCertificate
+    Export:
+      Name: Demo-PublicAlbSslListner
+  PublicAlbFullName:
+    Value: !GetAtt PublicApplicationLoadBalancer.LoadBalancerFullName
+    Export:
+      Name: Demo-PublicAlbFullName
+  PublicAlbHostname:
+    Value:
+      !Join ["", ["http://", !GetAtt PublicApplicationLoadBalancer.DNSName]]
